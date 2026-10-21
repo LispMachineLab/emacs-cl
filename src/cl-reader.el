@@ -823,58 +823,33 @@
 	       (not (string-match "^[-+0-9.]" string)))
       (throw 'parse-number (cl:values nil)))
 
-    (MULTIPLE-VALUE-BIND (integer end)
-	(PARSE-INTEGER string (kw RADIX) 10 (kw JUNK-ALLOWED) T)
-      ;; First, is it a string of decimal digits followed by a period or an
-      ;; exponent marker?  If so, can be either a decimal integer or a float.
-      ;; TODO: PARSE-INTEGER doesn't differentiate between 0 and -0, so
-      ;; e.g. -0.5 comes out wrong.
-      (when (and integer
-		 (< end (LENGTH string))
-		 (FIND (CHAR string end) ".DEFLSdefls"))
-	(if (and (eq (1+ end) (LENGTH string))
-		 (ch= (CHAR string end) 46))
-	    (throw 'parse-number (cl:values integer))
-	    (let ((fraction 0)
-		  (exponent 0)
-		  (end2 end))
-	      (when (ch= (CHAR string end) 46)
-		(MULTIPLE-VALUE-SETQ (fraction end2)
-		  (PARSE-INTEGER string (kw RADIX) 10 (kw START) (incf end)
-				 (kw JUNK-ALLOWED) T))
-		(when (eq end end2)
-		  (setq fraction 0)))
-	      (when (< end2 (LENGTH string))
-		(unless (FIND (CHAR string end2) "DEFLSdefls")
-		  (ERROR 'READ-ERROR))
-		(MULTIPLE-VALUE-SETQ (exponent end2)
-		  (PARSE-INTEGER string (kw RADIX) 10
-				 (kw START) (1+ end2)
-				 (kw JUNK-ALLOWED) T)))
-	      (when (= end2 (LENGTH string))
-		(case *READ-DEFAULT-FLOAT-FORMAT*
-		  ((SHORT-FLOAT SINGLE-FLOAT DOUBLE-FLOAT LONG-FLOAT))
-		  (t (ERROR 'PARSE-ERROR)))
-		(throw 'parse-number
-		  (cl:values
-		   (* (+ (FLOAT integer)
-			 (* (if (MINUSP integer) -1 1)
-			    (FLOAT fraction)
-			    (expt 10.0 (- end end2))))
-		      (expt 10.0 (FLOAT exponent)))))))))
-      ;; Second, is it a period followed by a string of decimal digits?
-      ;; TODO: minus sign.
-      ;; TODO: exponent.
-      (when (and (eq end 0)
-		 (> (LENGTH string) 1)
-		 (ch= (CHAR string 0) 46))
-	(MULTIPLE-VALUE-BIND (fraction end2)
-	    (PARSE-INTEGER string (kw RADIX) 10 (kw START) 1
-			   (kw JUNK-ALLOWED) T)
-	  (when (and integer (= end2 (LENGTH string)))
-	    (throw 'parse-number
-	      (cl:values
-	       (* (FLOAT fraction) (expt 10.0 (- 1 (LENGTH string))))))))))
+    ;; First, is it decimal digits followed by a period (a decimal
+    ;; integer), or a float: [sign] digits [. digits] [exponent], with
+    ;; digits on at least one side of the period?
+    (let ((case-fold-search t))
+      (when (string-match "\\`\\([-+]?\\)\\([0-9]*\\)\\(\\.\\([0-9]*\\)\\)?\\([defls]\\([-+]?[0-9]+\\)\\)?\\'"
+			  string)
+	(let ((sign (match-string 1 string))
+	      (digits (match-string 2 string))
+	      (point (match-beginning 3))
+	      (fraction (or (match-string 4 string) ""))
+	      (exponent (match-string 6 string)))
+	  (cond
+	    ((and point (string= fraction "") (null exponent)
+		  (not (string= digits "")))
+	     (throw 'parse-number
+	       (cl:values (PARSE-INTEGER (concat sign digits)
+					 (kw RADIX) 10))))
+	    ((and (or point (and exponent (<= *READ-BASE* 10)))
+		  (or (not (string= fraction ""))
+		      (and exponent (not (string= digits "")))))
+	     (throw 'parse-number
+	       (cl:values
+		(string-to-number
+		 (concat sign
+			 (if (string= digits "") "0" digits)
+			 "." (if (string= fraction "") "0" fraction)
+			 (if exponent (concat "e" exponent) ""))))))))))
     ;; Third, try parsing as a number in current input radix.  It can
     ;; be either an integer or a ratio.
     (MULTIPLE-VALUE-BIND (integer end)

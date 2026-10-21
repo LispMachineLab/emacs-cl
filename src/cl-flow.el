@@ -91,10 +91,13 @@
 
 (defun FBOUNDP (name)
   (cond
+    ;; Macros are kept in *macro-functions*, not in function cells.
     ((symbolp name)
-     (if (SPECIAL-OPERATOR-P name)
+     (if (or (SPECIAL-OPERATOR-P name)
+	     (fboundp name)
+	     (gethash name *macro-functions*))
 	 'T
-	 (fboundp name)))
+	 nil))
     ((setf-name-p name)
      (not (null (gethash (second name) *setf-definitions*))))
     (t

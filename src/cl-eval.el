@@ -511,42 +511,53 @@
 	      :variable (lambda-list-variables lambda-list)
 	      :declare decls))
 	  (other-keys-p nil)
-	  (allow-other-keys-p (memq '&ALLOW-OTHER-KEYS lambda-list)))
-      (do-lambda-list (((key var) default supplied) kind lambda-list)
-	;; TODO: special variables.
-	(case kind
-	  (:required
-	   (unless args
-	     (ERROR "No value for required parameter."))
-	   (setf (lexical-value var new-env) (pop args)))
-	  (&OPTIONAL
-	   (when supplied
-	     (setf (lexical-value supplied new-env) args))
-	   (setf (lexical-value var new-env)
-		 (if args
-		     (pop args)
-		     (eval-with-env default env))))
-	  (&REST
-	   (setf (lexical-value var new-env) (copy-list args))
-	   (unless (memq '&KEY lambda-list)
-	     (setq args nil)))
-	  (&KEY
-	   (let ((arg (memq key args)))
-	     (cond
-	       (arg
-		(setf (lexical-value var new-env) (second arg))
-		(when supplied (setf (lexical-value supplied new-env) 'T))
-		(remf args (first arg)))
-	       (t
-		(setf (lexical-value var new-env) (eval-with-env default env))
-		(when supplied (setf (lexical-value supplied new-env) nil))))))
-	  (&AUX
-	   (setf (lexical-value var new-env)
-		 (eval-with-env default new-env)))))
-      (when (and args (not (or allow-other-keys-p
-			       (memq (kw ALLOW-OTHER-KEYS) args))))
-	(ERROR 'PROGRAM-ERROR))
-      (eval-body body new-env))))
+	  (allow-other-keys-p (memq '&ALLOW-OTHER-KEYS lambda-list))
+	  ;; Old values of parameters declared special, restored on exit.
+	  (saved nil))
+      (cl-flet ((bind (var val)
+		  (if (lexical-variable-p var new-env)
+		      (setf (lexical-value var new-env) val)
+		      (push (cons var (if (boundp var) (symbol-value var) unbound))
+			    saved)
+		      (setf (symbol-value var) val))))
+	(unwind-protect
+	    (progn
+	      (do-lambda-list (((key var) default supplied) kind lambda-list)
+		(case kind
+		  (:required
+		   (unless args
+		     (ERROR "No value for required parameter."))
+		   (bind var (pop args)))
+		  (&OPTIONAL
+		   (when supplied
+		     (bind supplied (if args 'T nil)))
+		   (bind var (if args
+				 (pop args)
+				 (eval-with-env default new-env))))
+		  (&REST
+		   (bind var (copy-list args))
+		   (unless (memq '&KEY lambda-list)
+		     (setq args nil)))
+		  (&KEY
+		   (let ((arg (memq key args)))
+		     (cond
+		       (arg
+			(bind var (second arg))
+			(when supplied (bind supplied 'T))
+			(remf args (first arg)))
+		       (t
+			(bind var (eval-with-env default new-env))
+			(when supplied (bind supplied nil))))))
+		  (&AUX
+		   (bind var (eval-with-env default new-env)))))
+	      (when (and args (not (or allow-other-keys-p
+				       (memq (kw ALLOW-OTHER-KEYS) args))))
+		(ERROR 'PROGRAM-ERROR))
+	      (eval-body body new-env))
+	  (dolist (binding saved)
+	    (if (eq (cdr binding) unbound)
+		(makunbound (car binding))
+		(setf (symbol-value (car binding)) (cdr binding)))))))))
 
 (defun eval-forms (forms env)
   (mapcar (lambda (form) (eval-with-env form env))
@@ -601,11 +612,13 @@
     (range-error
 		nil)
     (void-variable
-		(ERROR 'UNBOUND-VARIABLE))
+		(ERROR 'UNBOUND-VARIABLE (kw NAME) (cadr args)))
     ((void-function invalid-function)
-		(ERROR 'UNDEFINED-FUNCTION))
+		(ERROR 'UNDEFINED-FUNCTION (kw NAME) (cadr args)))
     ((wrong-type-argument)
-		(ERROR 'TYPE-ERROR))
+		;; ARGS is (wrong-type-argument PREDICATE VALUE).
+		(ERROR 'TYPE-ERROR (kw DATUM) (caddr args)
+		       (kw EXPECTED-TYPE) (cadr args)))
     (no-catch
 		(ERROR 'CONTROL-ERROR))
     ((wrong-number-of-arguments no-catch wrong-type-argument)

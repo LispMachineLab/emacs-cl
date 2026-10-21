@@ -441,7 +441,8 @@
   (when (consp type)
     (case (first type)
       ((AND OR NOT)
-       (mapc #'find-new-objects (rest type)))
+       (dolist (x (rest type))
+	 (find-new-objects x env)))
       (EQL
        (push type *types*)
        (pushnew (second type) *subtypep-objects*))

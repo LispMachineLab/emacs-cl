@@ -13,7 +13,7 @@ compile:
 	  -f batch-byte-compile emacs-cl.el; \
 	status=$$?; rm -f emacs-cl.elc; exit $$status
 
-# Common Lisp's own tests, src/tests.lisp, compiled into build/.
+# Common Lisp's own tests, cl/tests.lisp, compiled into build/.
 check:
-	cd src && $(EMACS) -Q --batch -l ../emacs-cl-inferior.el --source . --build ../build \
+	cd cl && $(EMACS) -Q --batch -l ../emacs-cl-inferior.el --source . --build ../build \
 	  --eval '(load "tests.lisp")'; rm -f temporary.lisp temporary.elc

@@ -25,8 +25,8 @@ it neither changes your Emacs nor holds it up:
 The first start compiles Common Lisp into `emacs-cl-build-directory`
 (`~/.emacs.d/emacs-cl/`), which takes a few seconds; it is compiled
 again only when the sources or Emacs's version change.  To use it
-inside your Emacs instead, load `src/load-cl.el`.
+inside your Emacs instead, load `cl/load-cl.el`.
 
 `make test` runs the tests of the package, `make check` Common Lisp's
-own tests in `src/tests.lisp`.  See README for the original notes on
+own tests in `cl/tests.lisp`.  See README for the original notes on
 the implementation.

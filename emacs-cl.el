@@ -29,7 +29,7 @@
 ;;; Commentary:
 
 ;; Emacs Common Lisp implements Common Lisp in Emacs Lisp; its sources
-;; are in src/.  This file runs it beside the Emacs you work in, in a
+;; are in cl/.  This file runs it beside the Emacs you work in, in a
 ;; batch Emacs of its own (see emacs-cl-inferior.el): Common Lisp loads
 ;; the old cl library and defines hundreds of functions of its own, and
 ;; a long computation would hold up the editor.
@@ -44,7 +44,9 @@
 ;;
 ;; The first start compiles Common Lisp into `emacs-cl-build-directory',
 ;; which takes a few seconds; the sources carry no-byte-compile, so that
-;; installing the package does not compile them one at a time.
+;; installing the package does not compile them one at a time.  They
+;; are in cl/, not src/: package-vc would take src/ for the package's
+;; Lisp.
 
 ;;; Code:
 
@@ -75,7 +77,7 @@ It is made again whenever the sources or Emacs's version change."
 emacs-cl-inferior.el."
   `(,emacs-cl-program "-Q" "--batch"
     "-l" ,(expand-file-name "emacs-cl-inferior.el" emacs-cl-directory)
-    "--source" ,(expand-file-name "src/" emacs-cl-directory)
+    "--source" ,(expand-file-name "cl/" emacs-cl-directory)
     "--build" ,(expand-file-name emacs-cl-build-directory)
     ,@arguments))
 

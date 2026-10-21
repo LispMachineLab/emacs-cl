@@ -1,4 +1,4 @@
-;;;; -*- emacs-lisp -*-
+;;;; -*- emacs-lisp; no-byte-compile: t -*-
 ;;;
 ;;; Copyright (C) 2003, 2004 Lars Brinkhoff.
 ;;; A major mode implementing an Emacs Common Lisp listener.

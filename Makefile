@@ -1,20 +1,19 @@
-VERSION = 0.5
-CONTENT_DIR = emacs-cl-$(VERSION)
-CONTENT_TAR = $(CONTENT_DIR).tar
+EMACS ?= emacs
 
-package: $(CONTENT_TAR)
+.PHONY: test compile check
 
-$(CONTENT_TAR): $(CONTENT_DIR)
-	tar cf $@ $<
+# Tests of emacs-cl.el, running Common Lisp in a batch Emacs.
+test:
+	$(EMACS) -Q --batch -L . -l test/emacs-cl-test.el -f ert-run-tests-batch-and-exit
 
-$(CONTENT_DIR): emacs-cl-pkg.el Makefile
-	rm -rf $(CONTENT_DIR)
-	mkdir $(CONTENT_DIR)
-	sed "s/VERSION/$(VERSION)/" < $< > $(CONTENT_DIR)/$<
-	cp README $(CONTENT_DIR)
-	cp COPYING $(CONTENT_DIR)
-	cp src/* $(CONTENT_DIR)
+# A check: the .elc file is removed again, as it would shadow the source
+# of a checkout Emacs loads from.
+compile:
+	$(EMACS) -Q --batch -L . --eval '(setq byte-compile-error-on-warn t)' \
+	  -f batch-byte-compile emacs-cl.el; \
+	status=$$?; rm -f emacs-cl.elc; exit $$status
 
-clean:
-	$(MAKE) -C src clean
-	rm -rf $(CONTENT_DIR) $(CONTENT_TAR)
+# Common Lisp's own tests, src/tests.lisp, compiled into build/.
+check:
+	cd src && $(EMACS) -Q --batch -l ../emacs-cl-inferior.el --source . --build ../build \
+	  --eval '(load "tests.lisp")'; rm -f temporary.lisp temporary.elc

@@ -1,4 +1,5 @@
 *~
 *.elc
-emacs-cl-*
+/emacs-cl-[0-9]*/
 src/temporary.lisp
+build/

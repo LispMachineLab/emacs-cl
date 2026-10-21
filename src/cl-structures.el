@@ -480,6 +480,16 @@
 	       ,(kw DIRECT-SUPERCLASSES)
 	       (QUOTE (,(if include (first include) 'STRUCTURE-OBJECT))))))
 
+	;; Print as :print-object or :print-function says: a method of
+	;; PRINT-OBJECT, not made with DEFMETHOD, which a program may
+	;; have defined for itself.
+	,@(when (and (not type) (or print-object print-function))
+	    `((ensure-method
+	       (QUOTE PRINT-OBJECT) (QUOTE ((object ,name) stream))
+	       (QUOTE (,(if print-object
+			    `(FUNCALL (FUNCTION ,print-object) object stream)
+			    `(FUNCALL (FUNCTION ,print-function) object stream 0)))))))
+
 	;; Accessors.
 	,@(let ((index initial-offset))
 	    (when (or named (not type))

@@ -566,7 +566,9 @@
 
 (defun ensure-method (name lambda-list forms)
   (MULTIPLE-VALUE-BIND (body decls doc) (parse-body forms t)
-    (let ((gf (ENSURE-GENERIC-FUNCTION name (kw LAMBDA-LIST) lambda-list))
+    ;; A method of a generic function there already only adds to it.
+    (let ((gf (or (gf-or-error name)
+		  (ENSURE-GENERIC-FUNCTION name (kw LAMBDA-LIST) lambda-list)))
 	  (method (make-method
 		   (EXTRACT-LAMBDA-LIST lambda-list)
 		   (mapcar #'specializer

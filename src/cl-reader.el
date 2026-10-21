@@ -807,7 +807,11 @@
       (1 (setq package *keyword-package*))
       (2 (ERROR "Too many colons in token."))))
   (when (null token)
-    (ERROR "Token terminated by colon."))
+    ;; A lone colon reads as the keyword with an empty name, as in
+    ;; other implementations.
+    (if (and (eq package *keyword-package*) (eq colons 1))
+	(setq token "")
+	(ERROR "Token terminated by colon.")))
   (MULTIPLE-VALUE-BIND (sym status) (FIND-SYMBOL token package)
     (cl:values
       (cond

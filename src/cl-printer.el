@@ -307,11 +307,19 @@
      (WRITE-STRING (PACKAGE-NAME (SYMBOL-PACKAGE symbol)) stream)
      (WRITE-STRING (if (external-symbol-p symbol) ":" "::") stream))))
 
+;;; Whether NAME must be printed as |NAME| to read back as the same
+;;; symbol.  Reading the name back instead would intern it, and fail on
+;;; names that start with a dispatching macro character, like #FOO.
+(defun symbol-name-needs-escape-p (name)
+  (let ((case-fold-search nil))
+    (or (equal name "")
+	(string-match-p "[[:lower:][:space:]()'\";`,|\\:]" name)
+	(eq (aref name 0) ?#)
+	(string-match-p "\\`\\.+\\'" name)
+	(parse-number name))))
+
 (defun print-symbol-name (name stream)
-  (let* ((read-sym (unless (EQUAL name "")
-		     (READ-FROM-STRING name)))
-	 (escape (not (and (symbolp read-sym)
-			   (string= name (SYMBOL-NAME read-sym))))))
+  (let ((escape (symbol-name-needs-escape-p name)))
     (when escape
       (WRITE-STRING "|" stream))
     (WRITE-STRING (cond

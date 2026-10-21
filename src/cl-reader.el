@@ -436,7 +436,7 @@
        (cl:values (nreverse list)))
     (MULTIPLE-VALUE-BIND (object nothingp) (read1 stream t nil t t t)
       (unless (or *READ-SUPPRESS* nothingp)
-	(if (and (symbolp object) (string= (SYMBOL-NAME object) "."))
+	(if (eq object consing-dot)
 	    (let ((cdr (READ stream T nil T)))
 	      (unless (ch= (READ-CHAR stream) 41)
 		(ERROR 'READER-ERROR))
@@ -697,42 +697,58 @@
 
 
 (cl:defmacro BACKQUOTE (form)
-  (let ((result (expand-bq form)))
+  (let ((result (expand-bq form 1)))
     (if t
 	(optimize-bq result)
 	result)))
 
-(defun expand-bq (form)
+;;; LEVEL counts the backquotes around FORM that its commas have yet
+;;; to cancel.  Only commas at level 1 are evaluated; a nested
+;;; backquote and the commas inside it are built as data.
+
+(defun expand-bq (form level)
   (cond
     ((consp form)
      (case (car form)
        (COMMA
-	(second form))
+	(if (eq level 1)
+	    (second form)
+	    `(LIST (QUOTE COMMA) ,(expand-bq (second form) (1- level)))))
        ((COMMA-AT COMMA-DOT)
 	(ERROR "Syntax error in backquote."))
+       (BACKQUOTE
+	`(LIST (QUOTE BACKQUOTE) ,(expand-bq (second form) (1+ level))))
        (t
-	(cons 'APPEND (expand-bq-list form)))))
+	(cons 'APPEND (expand-bq-list form level)))))
     ((SIMPLE-VECTOR-P form)
-     `(APPLY (FUNCTION VECTOR) ,(expand-bq (MAP 'LIST #'IDENTITY form))))
+     `(APPLY (FUNCTION VECTOR) ,(expand-bq (MAP 'LIST #'IDENTITY form) level)))
     (t
      `(QUOTE ,form))))
 
-(defun* expand-bq-list (list)
+(defun* expand-bq-list (list level)
   (let ((car (car list))
 	(cdr (cdr list)))
     (cons
      (if (consp car)
 	 (case (first car)
-	   (COMMA			`(LIST ,(second car)))
-	   ((COMMA-AT COMMA-DOT)	(second car))
-	   (t				`(LIST ,(expand-bq car))))
+	   (COMMA
+	    (if (eq level 1)
+		`(LIST ,(second car))
+		`(LIST ,(expand-bq car level))))
+	   ((COMMA-AT COMMA-DOT)
+	    (if (eq level 1)
+		(second car)
+		`(LIST (LIST (QUOTE ,(first car))
+			     ,(expand-bq (second car) (1- level))))))
+	   (t
+	    `(LIST ,(expand-bq car level))))
 	 (case car
 	   (COMMA			(return-from expand-bq-list
-					  (list (second list))))
+					  (list (expand-bq list level))))
 	   ((COMMA-AT COMMA-DOT)	(ERROR "Syntax error in backquote."))
-	   (t				`(LIST ,(expand-bq car)))))
+	   (t				`(LIST ,(expand-bq car level)))))
      (if (consp cdr)
-	 (expand-bq-list cdr)
+	 (expand-bq-list cdr level)
 	 `((QUOTE ,cdr))))))
 
 (defun optimize-bq (form)
@@ -769,12 +785,18 @@
 							  ,(kw DOWNCASE)
 							  ,(kw INVERT)))))))
 
+;;; An unescaped "." token, the dot of a dotted list.  \. reads as a
+;;; symbol named ".".
+(defvar consing-dot (make-symbol "."))
+
 (defun* process-token (package colons token escape)
   "Process a token and return the corresponding Lisp object.
    PACKAGE is a string, or nil if there was no package prefix.
    COLONS is the number of colons before the token.
    TOKEN is a string, or nil if there was no token after the colons.
    ESCAPE is t if any character in TOKEN was escaped, and nil otherwise."
+  (when (and (null package) (zerop colons) (not escape) (equal token "."))
+    (return-from process-token consing-dot))
   (when (and (zerop colons) (not escape))
     (let ((n (parse-number token)))
       (when n

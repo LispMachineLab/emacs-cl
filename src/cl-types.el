@@ -217,9 +217,9 @@
     (T			'BOOLEAN)
     ((0 1)		'BIT)
     (t
-     (ecase (type-of object)
+     (case (ecl--type-of object)
        ;; This is supposed to be an exhaustive enumeration of all
-       ;; possible return values for Emacs Lisp type-of.
+       ;; possible return values for ecl--type-of.
        ((bit-vector bool-vector)
 			`(SIMPLE-BIT-VECTOR ,(length object)))
        (subr
@@ -259,10 +259,8 @@
 	  (STRING	`(STRING ,(vector-size object)))
 	  (VECTOR	`(VECTOR T ,(vector-size object)))
 	  (t		(aref object 0))))
-       ;; For now, throw an error on these.
-       ((buffer char-table frame marker overlay process
-	 subr window window-configuration)
-			(error "Unknown type: %s" (type-of object)))))))
+       ;; For now, throw an error on anything else.
+       (t		(error "Unknown type: %s" (type-of object)))))))
 
 ;;; TYPEP defined in cl-typep.el.
 

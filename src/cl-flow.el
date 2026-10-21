@@ -12,7 +12,7 @@
 (unless (fboundp 'functionp)
   (defun functionp (object)
     (or (subrp object)
-	(byte-code-function-p object)
+	(ecl--compiled-fn-p object)
 	(and (consp object)
 	     (eq (car object) 'lambda)))))
 
@@ -133,17 +133,17 @@
     ((INTERPRETED-FUNCTION-P fn)	(cl:values (interp-fn-lambda-exp fn)
 						   T nil))
     ((subrp fn)				(cl:values nil nil nil))
-    ((byte-code-function-p fn)		(cl:values nil nil nil))
+    ((ecl--compiled-fn-p fn)		(cl:values nil nil nil))
     ((FUNCTIONP fn)			(cl:values nil T nil))
     (t					(type-error fn 'FUNCTION))))
 
 (defun FUNCTIONP (object)
-  (or (byte-code-function-p object)
+  (or (ecl--compiled-fn-p object)
       (subrp object)
       (INTERPRETED-FUNCTION-P object)))
 
 (defun COMPILED-FUNCTION-P (object)
-  (or (byte-code-function-p object)
+  (or (ecl--compiled-fn-p object)
       (subrp object)))
 
 (defvar *constants* '(nil T PI))
@@ -312,7 +312,7 @@
 	 (eq (CHAR-CODE x) (CHAR-CODE y)))
 	((and (floatp x) (floatp y))
 	 (equal x y))
-	((and (bignump x) (bignump y))
+	((and (ecl--bignump x) (ecl--bignump y))
 	 (and (eq (length x) (length y))
 	      (every #'eq x y)))
 	((and (ratiop x) (ratiop y))

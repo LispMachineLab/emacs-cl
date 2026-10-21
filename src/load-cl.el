@@ -15,8 +15,9 @@
 (defmacro IN-PACKAGE (name) nil)
 (defun FIND-PACKAGE (name) nil)
 
+(require 'cl-extra)
 (unless (fboundp 'cl-mapcar-many)
-  (fset 'cl-mapcar-many (symbol-function 'cl--mapcar-many)))
+  (defun cl-mapcar-many (fn lists) (cl--mapcar-many fn lists t)))
 
 (defvar *cl-files*
   '("utils"
@@ -63,7 +64,10 @@
   (interactive)
   (let ((load-path (cons (file-name-directory load-file-name) load-path))
 	(debug-on-error t)
-	(byte-compile-warnings nil))
+	(byte-compile-warnings nil)
+	;; The files use macros and functions defined in later files,
+	;; so they can't be macroexpanded eagerly when loaded as source.
+	(macroexp--pending-eager-loads '(skip)))
     (mapc #'load *cl-files*)
     (populate-packages)
     (garbage-collect)))

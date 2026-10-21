@@ -96,7 +96,7 @@
 (defun lexical-variable-p (var env)
   (eq (nth-value 0 (variable-information var env)) :lexical))
 
-(defun special-variable-p (var env)
+(defun ecl--special-variable-p (var env)
   (not (lexical-variable-p var env)))
 
 ;;; TODO: let* bindings shouldn't be evaluated in an environment where
@@ -451,7 +451,7 @@
   (cond
     ((INTERPRETED-FUNCTION-P fn)
      (interp-fn-name fn))
-    ((byte-code-function-p fn)
+    ((ecl--compiled-fn-p fn)
      "")
     ((subrp fn)
      (let ((string (prin1-to-string fn)))
@@ -469,7 +469,7 @@
   (cond
     ((INTERPRETED-FUNCTION-P fn)
      (setf (interp-fn-name fn) name))
-    ((byte-code-function-p fn)
+    ((ecl--compiled-fn-p fn)
      name)
     ((subrp fn)
      name)

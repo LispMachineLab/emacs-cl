@@ -107,7 +107,7 @@
 				    DIRECT-SLOTS
 				    DIRECT-DEFAULT-INITARGS
 				    (METACLASS 'STANDARD-CLASS))
-  (when (some #'built-in-class-p DIRECT-SUPERCLASSES)
+  (when (some #'ecl--built-in-class-p DIRECT-SUPERCLASSES)
     (ERROR "Can't make subclass of a built-in class."))
   (unless (symbolp METACLASS)
     (setq METACLASS (CLASS-NAME METACLASS)))
@@ -219,7 +219,7 @@
 ;; keyword		standard-char
 ;; long-float		unsigned-byte
 
-(defun built-in-class-p (class) nil)
+(defun ecl--built-in-class-p (class) nil)
 (defvar *classes* (make-hash-table :test #'eq))
 (defconst +array-class+	       (make-built-in-class 'ARRAY))
 (defconst +bit-vector-class+   (make-built-in-class 'BIT-VECTOR '(VECTOR)))
@@ -299,7 +299,7 @@
 (defconst +vector-class+       (make-built-in-class 'VECTOR '(ARRAY SEQUENCE)))
 (dolist (args *initial-classes*)
   (apply #'ENSURE-CLASS args))
-(defun built-in-class-p (class)
+(defun ecl--built-in-class-p (class)
   (when (symbolp class)
     (setq class (FIND-CLASS class)))
   (eq (CLASS-OF class) +built-in-class+))
@@ -444,7 +444,7 @@
 (defun MAKE-INSTANCE (class &rest initargs)
   (when (symbolp class)
     (setq class (FIND-CLASS class)))
-  (when (built-in-class-p class)
+  (when (ecl--built-in-class-p class)
     (ERROR "Can't make instance of a built-in class."))
   ;; TODO: Augment initargs with default initargs.
   (let ((instance (apply #'ALLOCATE-INSTANCE class initargs)))
@@ -687,9 +687,9 @@
 (defun CLASS-OF (object)
   (if (null object)
       +null-class+
-      (ecase (type-of object)
+      (case (ecl--type-of object)
 	;; This is supposed to be an exhaustive enumeration of all
-	;; possible return values for Emacs Lisp type-of.
+	;; possible return values for ecl--type-of.
 	((bit-vector bool-vector)
 			+bit-vector-class+)
 	(subr		+function-class+)
@@ -715,10 +715,8 @@
 		 (INTERPRETED-FUNCTION
 				+function-class+)
 		 (SIMPLE-VECTOR	+vector-class+)))))
-	;; For now, throw an error on these.
-	((buffer char-table frame marker overlay process
-		 subr window window-configuration)
-			(error "Unknown type: %s" (type-of object))))))
+	;; For now, throw an error on anything else.
+	(t		(error "Unknown type: %s" (type-of object))))))
 
 (defun subclassp (class1 class2)
   (or (eq class2 +t-class+)

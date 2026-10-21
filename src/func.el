@@ -184,7 +184,7 @@
 	     (keyword-list
 	      (if (eval-when-compile (featurep 'xemacs))
 		  list
-		  `(load-time-value ,list)))
+		  `(ecl--load-time-value ,list)))
 	     (body
 	      `((while ,rest-sym
 		  (let ((,temp (position (pop ,rest-sym) ,keyword-list)) ,val)

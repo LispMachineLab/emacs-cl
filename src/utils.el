@@ -64,10 +64,12 @@
 		   :from-end t :initial-value `(apply ',fn1 args))))
       #'identity))
 
-(defun ensure-list (object)
-  (if (listp object)
-      object
-      (list object)))
+;;; Emacs 28 and later have ensure-list.
+(unless (fboundp 'ensure-list)
+  (defun ensure-list (object)
+    (if (listp object)
+	object
+	(list object))))
 
 (defmacro* do-list-designator ((var list &optional result) &body body)
   `(dolist (,var (ensure-list ,list) ,result)
@@ -100,9 +102,17 @@
 	  (set sym sym)
 	  sym))))
 
+;;; Like load-time-value, but also usable when byte-compiling a single
+;;; function: there is no output file then, so evaluate FORM right away.
+(defmacro ecl--load-time-value (form)
+  (if (and (macroexp-compiling-p)
+	   (bufferp (bound-and-true-p byte-compile--outbuffer)))
+      `(load-time-value ,form)
+      `(quote ,(eval form))))
+
 (if (eval-when-compile (featurep 'xemacs))
     (defmacro kw (name) `(keyword ,(symbol-name name)))
-    (defmacro kw (name) `(load-time-value (keyword ,(symbol-name name)))))
+    (defmacro kw (name) `(ecl--load-time-value (keyword ,(symbol-name name)))))
 
 (defun type-error (datum type)
   (ERROR 'TYPE-ERROR (kw DATUM) datum (kw EXPECTED-TYPE) type))
@@ -281,3 +291,22 @@
 (defun interned-p (symbol)
   (and (symbolp symbol)
        (eq (intern-soft (symbol-name symbol)) symbol)))
+
+;;; Emacs 30 represents interpreted closures as function objects that
+;;; are neither lists nor byte code; treat them like byte code.
+(defun ecl--compiled-fn-p (object)
+  (or (byte-code-function-p object)
+      (and (fboundp 'interpreted-function-p)
+	   (interpreted-function-p object))))
+
+;;; Emacs 28 and later have more function types than subr and
+;;; compiled-function; fold them into those two.
+(defun ecl--type-of (object)
+  (let ((type (type-of object)))
+    (case type
+      ((primitive-function special-form subr-native-elisp
+	native-comp-function module-function)
+       'subr)
+      ((byte-code-function interpreted-function)
+       'compiled-function)
+      (t type))))

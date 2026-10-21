@@ -41,7 +41,7 @@
     ((or (ratiop num1) (ratiop num2))
      (and (binary= (NUMERATOR num1) (NUMERATOR num2))
 	  (binary= (DENOMINATOR num1) (DENOMINATOR num2))))
-    ((and (bignump num1) (bignump num2))
+    ((and (ecl--bignump num1) (ecl--bignump num2))
      (and (= (length num1) (length num2))
 	  (every #'eql num1 num2)))
     ((and (NUMBERP num1) (NUMBERP num2))
@@ -72,7 +72,7 @@
      ;; TODO
      (< (/ (FLOAT (NUMERATOR num1)) (FLOAT (DENOMINATOR num1)))
 	(/ (FLOAT (NUMERATOR num2)) (FLOAT (DENOMINATOR num2)))))
-    ((or (bignump num1) (bignump num2))
+    ((or (ecl--bignump num1) (ecl--bignump num2))
      (MINUSP (binary- num1 num2)))
     (t
      (unless (REALP num1)
@@ -100,7 +100,7 @@
      ;; TODO
      (<= (/ (FLOAT (NUMERATOR num1)) (FLOAT (DENOMINATOR num1)))
 	 (/ (FLOAT (NUMERATOR num2)) (FLOAT (DENOMINATOR num2)))))
-    ((or (bignump num1) (bignump num2))
+    ((or (ecl--bignump num1) (ecl--bignump num2))
      (let ((diff (binary- num1 num2)))
        (or (MINUSP diff) (ZEROP diff))))
     (t
@@ -128,7 +128,7 @@
   (cond
     ((or (integerp num) (floatp num))
      (minusp num))
-    ((bignump num)
+    ((ecl--bignump num)
      (minusp (aref num (1- (length num)))))
     ((ratiop num)
      (MINUSP (NUMERATOR num)))
@@ -139,7 +139,7 @@
   (cond
     ((or (integerp num) (floatp num))
      (plusp num))
-    ((bignump num)
+    ((ecl--bignump num)
      (>= (aref num (1- (length num))) 0))
     ((ratiop num)
      (PLUSP (NUMERATOR num)))
@@ -154,7 +154,7 @@
      (ZEROP (NUMERATOR num)))
     ((COMPLEXP num)
      (and (ZEROP (REALPART num)) (ZEROP (IMAGPART num))))
-    ((bignump num)
+    ((ecl--bignump num)
      nil)
     (t
      (type-error num 'NUMBER))))
@@ -471,7 +471,7 @@
      (make-ratio (binary+ (binary* (NUMERATOR x) (DENOMINATOR y))
 			  (binary* (DENOMINATOR x) (NUMERATOR y)))
 		 (binary* (DENOMINATOR x) (DENOMINATOR y))))
-    ((or (bignump x) (bignump y))
+    ((or (ecl--bignump x) (ecl--bignump y))
 ;    (print (format "%s %s" x y))
      (cond
        ((integerp x)	(bignum+fixnum y x))
@@ -510,7 +510,7 @@
 
 (defun canonical-bignum (object)
   (cond
-    ((bignump object)
+    ((ecl--bignump object)
      (canonical-bignum (bignum-list object)))
     ((listp object)
      (setq object (truncate-sign-extension object))
@@ -581,7 +581,7 @@
 	 (vector 'RATIO (cl:- (NUMERATOR number)) (DENOMINATOR number)))
 	((COMPLEXP number)
 	 (vector 'COMPLEX (cl:- (REALPART number)) (cl:- (IMAGPART number))))
-	((bignump number)
+	((ecl--bignump number)
 	 (bignum+fixnum (LOGNOT number) 1))
 	(t
 	 (error "error")))
@@ -598,7 +598,7 @@
 	 (vector 'RATIO 1 number))
 	((floatp number)
 	 (/ 1.0 number))
-	((bignump number)
+	((ecl--bignump number)
 	 (vector 'RATIO 1 number))
 	((ratiop number)
 	 (make-ratio (DENOMINATOR number) (NUMERATOR number)))
@@ -656,7 +656,7 @@
      (let ((r (FLOAT (REALPART number)))
 	   (i (FLOAT (IMAGPART number))))
        (sqrt (+ (* r r) (* i i)))))
-    ((bignump number)
+    ((ecl--bignump number)
      (if (MINUSP number)
 	 (cl:- number)
 	 number))
@@ -846,7 +846,7 @@
      (random limit))
     ((floatp limit)
      (/ (* limit (random MOST-POSITIVE-FIXNUM)) MOST-POSITIVE-FIXNUM))
-    ((bignump limit)
+    ((ecl--bignump limit)
      ;; TODO
      0)))
 
@@ -981,7 +981,7 @@
      (cond
        ((integerp num)
 	(ash num shift))
-       ((bignump num)
+       ((ecl--bignump num)
 	(let ((new (copy-sequence num)))
 	  (while (MINUSP shift)
 	    (shift-right new)
@@ -1014,7 +1014,7 @@
   (cond
     ((eq num 0)		0)
     ((integerp num)	(1+ (logb num)))
-    ((bignump num)	(let* ((len (1- (length num)))
+    ((ecl--bignump num)	(let* ((len (1- (length num)))
 			       (last (aref num len)))
 			  (+ (* fixnum-bits (1- len))
 			     (if (zerop last)
@@ -1022,11 +1022,11 @@
 				 (1+ (logb last))))))
     (t			(type-error num 'INTEGER))))
 
-(defun bignump (num)
+(defun ecl--bignump (num)
   (vector-and-typep num 'BIGNUM))
 
 (defun INTEGERP (num)
-  (or (integerp num) (bignump num)))
+  (or (integerp num) (ecl--bignump num)))
 
 (cl:defun PARSE-INTEGER (string &KEY (START 0) (END (LENGTH string))
 			             (RADIX 10) JUNK-ALLOWED)
@@ -1109,7 +1109,7 @@
   (cond
     ((integerp num)
      (lognot num))
-    ((bignump num)
+    ((ecl--bignump num)
      ;; TODO: may need one more element in result.
      (let ((new (make-vector (length num) 'BIGNUM)))
        (dotimes (i (1- (length num)))
@@ -1125,19 +1125,19 @@
   (cond
     ((and (integerp x) (integerp y))
      (logand x y))
-    ((and (bignump x) (integerp y))
+    ((and (ecl--bignump x) (integerp y))
      (if (minusp y)
 	 (let ((new (copy-sequence x)))
 	   (aset new 1 (logand (aref x 1) y))
 	   new)
 	 (logand (aref x 1) y)))
-    ((and (bignump y) (integerp x))
+    ((and (ecl--bignump y) (integerp x))
      (if (minusp x)
 	 (let ((new (copy-sequence y)))
 	   (aset new 1 (logand (aref y 1) x))
 	   new)
 	 (logand (aref y 1) x)))
-    ((and (bignump x) (bignump y))
+    ((and (ecl--bignump x) (ecl--bignump y))
      (bignum-logand x y))
     (t
      (unless (INTEGERP x)
@@ -1163,19 +1163,19 @@
   (cond
     ((and (integerp x) (integerp y))
      (logior x y))
-    ((and (bignump x) (integerp y))
+    ((and (ecl--bignump x) (integerp y))
      (if (minusp y)
 	 (logior (aref x 1) y)
 	 (let ((new (copy-sequence x)))
 	   (aset new 1 (logior (aref x 1) y))
 	   new)))
-    ((and (bignump y) (integerp x))
+    ((and (ecl--bignump y) (integerp x))
      (if (minusp x)
 	 (logior (aref y 1) x)
 	 (let ((new (copy-sequence y)))
 	   (aset new 1 (logior (aref y 1) x))
 	   new)))
-    ((and (bignump x) (bignump y))
+    ((and (ecl--bignump x) (ecl--bignump y))
      (bignum-logior x y))
     (t
      (unless (INTEGERP x)
@@ -1222,21 +1222,21 @@
   (cond
     ((and (integerp x) (integerp y))
      (logxor x y))
-    ((and (bignump x) (integerp y))
+    ((and (ecl--bignump x) (integerp y))
      (let ((new (copy-sequence x)))
        (aset new 1 (logxor (aref x 1) y))
        (when (minusp y)
 	 (dotimes (i (- (length x) 2))
 	   (aset new (+ i 2) (lognot (aref new (+ i 2))))))
        new))
-    ((and (bignump y) (integerp x))
+    ((and (ecl--bignump y) (integerp x))
      (let ((new (copy-sequence y)))
        (aset new 1 (logior (aref y 1) x))
        (when (minusp x)
 	 (dotimes (i (- (length y) 2))
 	   (aset new (+ i 2) (lognot (aref new (+ i 2))))))
        new))
-    ((and (bignump x) (bignump y))
+    ((and (ecl--bignump x) (ecl--bignump y))
      (bignum-logxor x y))
     (t
      (unless (INTEGERP x)
@@ -1266,7 +1266,7 @@
      (if (>= index fixnum-bits)
 	 (minusp integer)
 	 (not (zerop (logand integer (ash 1 index))))))
-    ((bignump integer)
+    ((ecl--bignump integer)
      (if (>= index (* fixnum-bits (1- (length integer))))
 	 (MINUSP integer)
 	 (let ((i (1+ (/ index fixnum-bits)))
@@ -1422,7 +1422,7 @@
      num)
     ((ratiop num)
      (/ (FLOAT (NUMERATOR num)) (FLOAT (DENOMINATOR num))))
-    ((bignump num)
+    ((ecl--bignump num)
      (bignum-float num))
     (t
      (type-error num 'REAL))))

@@ -168,6 +168,9 @@
 	(setq constructors (list (symcat "MAKE-" name))))
 
       ;; Calculate the effective slot list.
+      ;; A documentation string may precede the slot descriptions.
+      (when (stringp (first slots))
+	(setq slots (rest slots)))
       (setq slots (mapcar #'canonicalize-slot slots))
       (when include
 	(let ((included-slots (struct-slots (first include))))
@@ -366,6 +369,9 @@
 	(setq constructors (list (cl:symcat "MAKE-" name))))
 
       ;; Calculate the effective slot list.
+      ;; A documentation string may precede the slot descriptions.
+      (when (stringp (first slots))
+	(setq slots (rest slots)))
       (setq slots (mapcar #'canonicalize-slot slots))
       (when include
 	(let ((included-slots (struct-slots (first include))))

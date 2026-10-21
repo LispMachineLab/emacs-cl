@@ -328,35 +328,38 @@
   (let ((stream (output-stream stream-designator)))
     nil))
 
-(defun Y-OR-N-P (&optional format &rest args)
+;;; Both read a whole line, so the newline that ends an answer isn't
+;;; taken as the next answer.
+(defun query-answer (format args choices)
   (when format
     (FRESH-LINE *QUERY-IO*)
     (apply #'FORMAT *QUERY-IO* format args))
+  (FORMAT *QUERY-IO* " (~A or ~A) " (car choices) (cadr choices))
+  (string-trim (el-string (READ-LINE *QUERY-IO*))))
+
+(defun Y-OR-N-P (&optional format &rest args)
   (catch 'Y-OR-N-P
     (loop
-     (let ((char (READ-CHAR *QUERY-IO*)))
+     (let ((answer (query-answer format args '("y" "n"))))
        (cond
-	 ((CHAR-EQUAL char (ch 89))
+	 ((string-prefix-p "y" answer t)
 	  (throw 'Y-OR-N-P T))
-	 ((CHAR-EQUAL char (ch 78))
+	 ((string-prefix-p "n" answer t)
 	  (throw 'Y-OR-N-P nil))
 	 (t
-	  (WRITE-LINE "Please answer 'y' or 'n'. ")))))))
+	  (WRITE-LINE "Please answer 'y' or 'n'." *QUERY-IO*)))))))
 
 (defun YES-OR-NO-P (&optional format &rest args)
-  (when format
-    (FRESH-LINE *QUERY-IO*)
-    (apply #'FORMAT *QUERY-IO* format args))
   (catch 'YES-OR-NO-P
     (loop
-     (let ((line (READ-LINE *QUERY-IO*)))
+     (let ((answer (query-answer format args '("yes" "no"))))
        (cond
-	 ((STRING-EQUAL line "yes")
+	 ((string-equal answer "yes")
 	  (throw 'YES-OR-NO-P T))
-	 ((STRING-EQUAL line "no")
+	 ((string-equal answer "no")
 	  (throw 'YES-OR-NO-P nil))
 	 (t
-	  (WRITE-LINE "Please answer 'yes' or 'no'. ")))))))
+	  (WRITE-LINE "Please answer 'yes' or 'no'." *QUERY-IO*)))))))
 
 (defun MAKE-SYNONYM-STREAM (symbol)
   (mk-SYNONYM-STREAM

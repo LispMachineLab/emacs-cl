@@ -65,7 +65,8 @@
 
 (defcustom emacs-cl-build-directory (locate-user-emacs-file "emacs-cl/")
   "The directory Common Lisp is compiled into.
-It is made again whenever the sources or Emacs's version change."
+It holds a build for each version of the sources and of Emacs; one not
+used for a week is deleted."
   :type 'directory)
 
 (defcustom emacs-cl-program (expand-file-name invocation-name invocation-directory)

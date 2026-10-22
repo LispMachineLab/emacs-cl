@@ -28,14 +28,16 @@
 ;;   emacs -Q --batch -l emacs-cl-inferior.el --source DIR --build DIR
 ;;         [--load FILE]... [--package NAME] [--eval FORM]... [--repl]
 ;;
-;; It compiles the Common Lisp of the source directory into the build
-;; directory unless that was done already, loads it, connects
+;; It compiles the Common Lisp of the source directory into a directory
+;; of the build directory named after the sources and Emacs's version,
+;; unless that was done already, loads it, connects
 ;; *STANDARD-INPUT* to stdin and *STANDARD-OUTPUT* to stdout, then loads
 ;; the files, makes NAME the current package and evaluates the forms,
 ;; in the order given; CL-USER is current until --package.  With --repl
 ;; it goes on as a listener.  An
 ;; error that Common Lisp does not handle is printed; it ends the
-;; program, or, in the listener, the form.  With --build-only it only
+;; program, with exit status 1, or, in the listener, the form and the
+;; rest of its line.  With --build-only it only
 ;; compiles.
 ;;
 ;; Output is sent at the end of each line and before input is read:
@@ -62,6 +64,12 @@
 
 (defvar emacs-cl-inferior--at-line-start nil
   "A function telling a stream it is at the start of a line.")
+
+(defvar emacs-cl-inferior--streams nil
+  "The streams reading stdin: the input stream and the two-way one.")
+
+(defvar emacs-cl-inferior--describing nil
+  "Non-nil while an error is being described.")
 
 (defun emacs-cl-inferior--say (string)
   "Send STRING to stdout now."
@@ -106,37 +114,62 @@ them one at a time without the rest of Common Lisp loaded."
       (write-region nil nil (expand-file-name (file-name-nondirectory file) directory)
                     nil 'silent))))
 
+(defconst emacs-cl-inferior-keep-days 7
+  "Builds not used for this many days are deleted.")
+
+(defun emacs-cl-inferior--compile (directory)
+  "Compile the copies of Common Lisp's sources in DIRECTORY; return nil, or
+what went wrong."
+  (with-temp-buffer
+    (let ((default-directory (file-name-as-directory directory)))
+      (if (and (eq 0 (call-process (expand-file-name invocation-name invocation-directory)
+                                   nil t nil "-Q" "--batch"
+                                   "--eval" "(setq inhibit-message t)"
+                                   "-l" "load-cl.el" "-f" "compile-cl"
+                                   ;; compile-cl goes on after a file fails.
+                                   "--eval" "(dolist (file *cl-files*)
+                                               (unless (file-exists-p (concat file \".elc\"))
+                                                 (message \"%s.el was not compiled\" file)
+                                                 (kill-emacs 1)))"))
+               (file-exists-p "load-cl.el"))
+          nil
+        (let ((lines (seq-filter (lambda (line) (string-match-p "Error:\\|not compiled" line))
+                                 (split-string (buffer-string) "\n" t))))
+          (string-join (or (last lines 5) '("the compiler said nothing")) "\n"))))))
+
 (defun emacs-cl-inferior-build (source build)
-  "Compile the Common Lisp of SOURCE into BUILD, unless it is there already.
-The build is made in a directory beside BUILD and then put in its place,
-so that a program starting meanwhile finds either the old build or the
-new one."
-  (let ((stamp (emacs-cl-inferior--stamp source))
-        (stamp-file (expand-file-name "stamp" build)))
-    (unless (equal stamp (emacs-cl-inferior--read-file stamp-file))
+  "Compile the Common Lisp of SOURCE into a directory of BUILD named after
+the sources and Emacs's version, unless it is there; return that directory.
+A build is made in a directory of its own and then renamed into place, and
+none is replaced: Emacs programs starting meanwhile, of this version or
+another, find a whole build or none.  Builds not used for a week go."
+  (let* ((stamp (emacs-cl-inferior--stamp source))
+         (directory (file-name-as-directory
+                     (expand-file-name (substring (secure-hash 'sha1 stamp) 0 12) build))))
+    (unless (equal stamp (emacs-cl-inferior--read-file (expand-file-name "stamp" directory)))
       (emacs-cl-inferior--say "Compiling Common Lisp; it is done once.\n")
-      (let* ((parent (file-name-directory (directory-file-name build)))
-             (temporary (progn (make-directory parent t)
-                               (make-temp-file (expand-file-name "emacs-cl-build-" parent) t))))
+      (make-directory build t)
+      (let ((temporary (make-temp-file (expand-file-name "building-" build) t)))
         (dolist (file (emacs-cl-inferior--sources source))
           (emacs-cl-inferior--copy file temporary))
-        (let ((default-directory (file-name-as-directory temporary)))
-          (unless (eq 0 (call-process (expand-file-name invocation-name invocation-directory)
-                                      nil nil nil "-Q" "--batch"
-                                      "--eval" "(setq inhibit-message t)"
-                                      "-l" "load-cl.el" "-f" "compile-cl"))
-            (delete-directory temporary t)
-            (error "Compiling Common Lisp failed")))
+        (when-let* ((problem (emacs-cl-inferior--compile temporary)))
+          (delete-directory temporary t)
+          (error "Compiling Common Lisp failed: %s" problem))
         (with-temp-file (expand-file-name "stamp" temporary)
           (insert stamp))
-        (when (file-directory-p build)
-          (let ((old (make-temp-name (expand-file-name "emacs-cl-old-" parent))))
-            (rename-file (directory-file-name build) old)
-            (delete-directory old t)))
         (condition-case nil
-            (rename-file temporary (directory-file-name build))
-          ;; Another program put its build there first.
-          (file-already-exists (delete-directory temporary t)))))))
+            (rename-file temporary (directory-file-name directory))
+          ;; Another program put the same build there first.
+          (file-already-exists (delete-directory temporary t)))))
+    ;; In use: keep it from being taken for an old one.
+    (set-file-times directory)
+    (let ((old (time-subtract nil (days-to-time emacs-cl-inferior-keep-days))))
+      (dolist (other (directory-files build t "\\`[^.]"))
+        (when (and (file-directory-p other)
+                   (not (file-equal-p other directory))
+                   (time-less-p (file-attribute-modification-time (file-attributes other)) old))
+          (ignore-errors (delete-directory other t)))))
+    directory))
 
 ;;;; Streams
 
@@ -175,7 +208,24 @@ new one."
       ;; start of a line, so FRESH-LINE has nothing to do.
       (when (and (eq code ?\n) emacs-cl-inferior--output)
         (funcall emacs-cl-inferior--at-line-start emacs-cl-inferior--output))
-      (CODE-CHAR code))))
+      ;; Common Lisp's characters stop at 255 here.
+      (CODE-CHAR (if (< code CHAR-CODE-LIMIT) code ??)))))
+
+(defun emacs-cl-inferior-clear-input ()
+  "Drop what is left of the line of input being read."
+  (setq emacs-cl-inferior--index (length emacs-cl-inferior--line)))
+
+(defun emacs-cl-inferior--skip-blank-line ()
+  "Take the rest of the line of input being read when it is blank, as the
+newline after a form typed at the listener."
+  (when (string-match-p "\\`[ \t]*\n?\\'"
+                        (substring emacs-cl-inferior--line
+                                   (min emacs-cl-inferior--index
+                                        (length emacs-cl-inferior--line))))
+    (when (and (> (length emacs-cl-inferior--line) emacs-cl-inferior--index)
+               emacs-cl-inferior--output)
+      (funcall emacs-cl-inferior--at-line-start emacs-cl-inferior--output))
+    (emacs-cl-inferior-clear-input)))
 
 (defun emacs-cl-inferior--connect ()
   "Make the standard streams read stdin and write stdout."
@@ -190,20 +240,30 @@ new one."
           ;; loaded.
           emacs-cl-inferior--at-line-start
           (eval '(lambda (stream) (setf (STREAM-fresh-line-p stream) t)) t)
+          emacs-cl-inferior--streams (list in io)
           *STANDARD-INPUT* in
           *STANDARD-OUTPUT* out
           *ERROR-OUTPUT* out
           *TRACE-OUTPUT* out
           *TERMINAL-IO* io
           *QUERY-IO* io
-          *DEBUG-IO* io)))
+          *DEBUG-IO* io)
+    (let ((clear-input (symbol-function 'CLEAR-INPUT)))
+      (defalias 'CLEAR-INPUT
+        (lambda (&optional stream)
+          "Clear the input of STREAM, stdin's dropping the rest of its line."
+          (when (or (memq stream '(nil T t))
+                    (memq stream emacs-cl-inferior--streams))
+            (emacs-cl-inferior-clear-input))
+          (funcall clear-input stream))))))
 
 ;;;; Errors
 
 (defun emacs-cl-inferior--describe (condition)
   "Return what CONDITION says, as a string."
   (let ((debug-on-signal nil)
-        (debug-on-error nil))
+        (debug-on-error nil)
+        (emacs-cl-inferior--describing t))
     (emacs-cl-inferior--describe-1 condition)))
 
 (defun emacs-cl-inferior--describe-1 (condition)
@@ -223,6 +283,9 @@ new one."
         (and (TYPEP condition 'UNBOUND-VARIABLE)
              (FORMAT nil "The variable ~S is unbound" (CELL-ERROR-NAME condition))))
       (ignore-errors
+        (and (TYPEP condition 'END-OF-FILE)
+             "The input ended"))
+      (ignore-errors
         (and (TYPEP condition 'UNDEFINED-FUNCTION)
              (FORMAT nil "The function ~S is undefined" (CELL-ERROR-NAME condition))))
       (ignore-errors (FORMAT nil "~A" condition))
@@ -236,7 +299,12 @@ terminal: call *DEBUGGER-HOOK*, then give up the form being evaluated."
       (let ((*DEBUGGER-HOOK* nil))
         (FUNCALL hook condition hook))))
   (throw 'emacs-cl-inferior--error
-         (list :error (emacs-cl-inferior--describe condition))))
+         (list :error (if emacs-cl-inferior--describing
+                          ;; Describing it failed in turn: say no more.
+                          (if (vectorp condition)
+                              (format "%s" (aref condition 0))
+                            "an error")
+                        (emacs-cl-inferior--describe condition)))))
 
 (defun emacs-cl-inferior--protect (function)
   "Call FUNCTION; print an error Common Lisp does not handle, and return
@@ -255,26 +323,41 @@ terminal: call *DEBUGGER-HOOK*, then give up the form being evaluated."
 
 ;;;; Listener
 
+(defun emacs-cl-inferior--prompt ()
+  "Write the listener's prompt, the current package's name."
+  ;; A Common Lisp error here would come back with every prompt.
+  (let ((name (and (PACKAGEP *PACKAGE*) (PACKAGE-NAME *PACKAGE*))))
+    (unless name
+      (setq *PACKAGE* (FIND-PACKAGE "COMMON-LISP-USER")
+            name "COMMON-LISP-USER")
+      (FORMAT T "~&;; *PACKAGE* was no package: it is CL-USER again.~%"))
+    (FORMAT T "~&~A> " name)))
+
 (defun emacs-cl-inferior--repl ()
   "Read forms from stdin, evaluate them and print their values, until
-stdin ends."
+stdin ends.  After an error, the rest of the line is dropped: it would
+be read from where the error left off."
   (let ((eof (make-symbol "eof")))
     (catch 'emacs-cl-inferior--done
       (while t
-        (FORMAT T "~&~A> " (PACKAGE-NAME *PACKAGE*))
-        (emacs-cl-inferior--protect
-         (lambda ()
-           (let ((form (READ *STANDARD-INPUT* nil eof)))
-             (when (eq form eof)
-               (throw 'emacs-cl-inferior--done nil))
-             (dolist (value (emacs-cl-eval-interactively form))
-               (FORMAT T "~&~S~%" value)))))))))
+        (when (eq :error
+                  (emacs-cl-inferior--protect
+                   (lambda ()
+                     (emacs-cl-inferior--prompt)
+                     (let ((form (READ *STANDARD-INPUT* nil eof)))
+                       (when (eq form eof)
+                         (throw 'emacs-cl-inferior--done nil))
+                       (emacs-cl-inferior--skip-blank-line)
+                       (dolist (value (emacs-cl-eval-interactively form))
+                         (FORMAT T "~&~S~%" value))))))
+          (emacs-cl-inferior-clear-input))))))
 
 ;;;; Main
 
 (defun emacs-cl-inferior-main ()
-  "Do what the command line asks, as the Commentary says."
-  (let (source build actions repl build-only)
+  "Do what the command line asks, as the Commentary says; return the exit
+status: 1 when a file or form not in the listener failed."
+  (let (source build actions repl build-only (status 0))
     (while command-line-args-left
       (let ((argument (pop command-line-args-left)))
         (pcase argument
@@ -290,7 +373,7 @@ stdin ends."
       (error "--source and --build are required"))
     (setq source (file-name-as-directory (expand-file-name source))
           build (file-name-as-directory (expand-file-name build)))
-    (emacs-cl-inferior-build source build)
+    (setq build (emacs-cl-inferior-build source build))
     (unless build-only
       (let ((load-path (cons build load-path))
             (load (symbol-function 'load)))
@@ -313,16 +396,17 @@ stdin ends."
                                               (ERROR "There is no package ~A" name))))
                          (`(eval . ,form) (EVAL (READ-FROM-STRING form)))))))
             (unless repl
+              (setq status 1)
               (throw 'emacs-cl-inferior--stop nil)))))
       (when repl
         (emacs-cl-inferior--repl))
-      (emacs-cl-inferior--flush))))
+      (emacs-cl-inferior--flush))
+    status))
 
 (when noninteractive
   ;; Emacs's own messages, as about the old cl library Common Lisp
   ;; loads, are not the program's output.
   (setq inhibit-message t)
-  (emacs-cl-inferior-main)
-  (kill-emacs 0))
+  (kill-emacs (emacs-cl-inferior-main)))
 
 ;;; emacs-cl-inferior.el ends here

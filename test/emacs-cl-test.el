@@ -87,17 +87,17 @@
     (let ((process (emacs-cl-start buffer :repl t)))
       (should (emacs-cl-test-wait process (emacs-cl-test-output-p "COMMON-LISP-USER> ")))
       (process-send-string process "undefined-variable\n(* 6 7)\n")
-      (should (emacs-cl-test-wait process (emacs-cl-test-output-p "^42$")))
+      (should (emacs-cl-test-wait process (emacs-cl-test-output-p "> 42$")))
       (with-current-buffer buffer
         (should (string-search "The variable UNDEFINED-VARIABLE is unbound" (buffer-string)))))))
 
 (ert-deftest emacs-cl-build-once ()
   "The build is made once and kept while the sources do not change."
-  (let ((stamp (expand-file-name "stamp" emacs-cl-test-build)))
-    (emacs-cl-test-with-buffer buffer
-      (let ((process (emacs-cl-start buffer :eval '("(print 1)"))))
-        (should (emacs-cl-test-wait process (lambda () (not (process-live-p process)))))))
-    (should (file-exists-p stamp))
+  (emacs-cl-test-with-buffer buffer
+    (let ((process (emacs-cl-start buffer :eval '("(print 1)"))))
+      (should (emacs-cl-test-wait process (lambda () (not (process-live-p process)))))))
+  (let ((stamp (car (directory-files-recursively emacs-cl-test-build "\\`stamp\\'"))))
+    (should stamp)
     (let ((time (file-attribute-modification-time (file-attributes stamp))))
       (emacs-cl-test-with-buffer buffer
         (let ((process (emacs-cl-start buffer :eval '("(print 2)"))))
@@ -105,5 +105,47 @@
           (with-current-buffer buffer
             (should-not (string-search "Compiling" (buffer-string))))))
       (should (equal time (file-attribute-modification-time (file-attributes stamp)))))))
+
+(ert-deftest emacs-cl-program-exit-status ()
+  "A program ending on an error exits with status 1, one that ends well 0."
+  (emacs-cl-test-with-buffer buffer
+    (let ((process (emacs-cl-start buffer :eval '("(car 5)"))))
+      (should (emacs-cl-test-wait process (lambda () (not (process-live-p process)))))
+      (should (eq 1 (process-exit-status process)))))
+  (emacs-cl-test-with-buffer buffer
+    (let ((process (emacs-cl-start buffer :eval '("(+ 1 2)"))))
+      (should (emacs-cl-test-wait process (lambda () (not (process-live-p process)))))
+      (should (eq 0 (process-exit-status process))))))
+
+(ert-deftest emacs-cl-listener-drops-the-line-after-an-error ()
+  "After an error the rest of the line is not read as more forms."
+  (emacs-cl-test-with-buffer buffer
+    (let ((process (emacs-cl-start buffer :repl t)))
+      (should (emacs-cl-test-wait process (emacs-cl-test-output-p "COMMON-LISP-USER> ")))
+      (process-send-string process "(list nopkg:bar 1 (print :side-effect))\n(+ 20 22)\n")
+      (should (emacs-cl-test-wait process (emacs-cl-test-output-p "> 42$")))
+      (with-current-buffer buffer
+        (should (string-search "NOPKG" (buffer-string)))
+        (should-not (string-search "SIDE-EFFECT" (buffer-string)))))))
+
+(ert-deftest emacs-cl-listener-reads-the-next-line ()
+  "READ-LINE typed at the listener reads the line after it, not the
+newline ending its own."
+  (emacs-cl-test-with-buffer buffer
+    (let ((process (emacs-cl-start buffer :repl t)))
+      (should (emacs-cl-test-wait process (emacs-cl-test-output-p "COMMON-LISP-USER> ")))
+      (process-send-string process "(read-line)\nhello there\n")
+      (should (emacs-cl-test-wait process (emacs-cl-test-output-p "\"hello there\""))))))
+
+(ert-deftest emacs-cl-common-lisp ()
+  "Init forms see outer variables; FORMAT prints floats as CLHS says."
+  (emacs-cl-test-with-buffer buffer
+    (let ((process (emacs-cl-start
+                    buffer :eval '("(print (let ((x 10)) (funcall (lambda (&optional (x x)) x))))"
+                                   "(print (list (format nil \"~F\" 1e-5) (format nil \"~,,,2E\" 1234.5) (format nil \"~,0F\" 2.5)))"))))
+      (should (emacs-cl-test-wait process (lambda () (not (process-live-p process)))))
+      (with-current-buffer buffer
+        (should (string-search "\n10 " (buffer-string)))
+        (should (string-search "(\"0.00001\" \"12.345e+2\" \"2.\")" (buffer-string)))))))
 
 ;;; emacs-cl-test.el ends here

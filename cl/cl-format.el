@@ -336,17 +336,45 @@ character code."
 (defun fmt-float-arg (arg)
   (and (REALP arg) (FLOAT arg)))
 
+(defun fmt-float-digits (x)
+  "Return (DIGITS . EXPONENT): X, a nonnegative float, is 0.DIGITS times
+ten to EXPONENT, with the fewest DIGITS that read back as X."
+  (if (zerop x)
+      (cons "0" 0)
+      (let* ((s (number-to-string x))
+	     (e (string-match "e" s))
+	     (mantissa (substring s 0 e))
+	     (exponent (if e (string-to-number (substring s (1+ e))) 0))
+	     (point (or (string-search "." mantissa) (length mantissa)))
+	     (digits (string-replace "." "" mantissa))
+	     (zeros (progn (string-match "\\`0*" digits) (match-end 0))))
+	(setq digits (replace-regexp-in-string "0+\\'" "" (substring digits zeros)))
+	(cons (if (string-empty-p digits) "0" digits) (+ (- point zeros) exponent)))))
+
+(defun fmt-rounded-digits (x n)
+  "Return (DIGITS . EXPONENT) as `fmt-float-digits' does, X rounded to N
+significant digits."
+  (let ((s (format (format "%%.%de" (max 0 (1- n))) x)))
+    (string-match "\\`\\([0-9]\\)\\.?\\([0-9]*\\)e\\([-+][0-9]+\\)\\'" s)
+    (cons (concat (match-string 1 s) (match-string 2 s))
+	  (if (zerop x) 0 (1+ (string-to-number (match-string 3 s)))))))
+
 (defun fmt-free-float (x)
-  (let ((s (number-to-string x)))
-    (if (string-match "e" s)
-	(let ((f (format "%f" x)))
-	  (if (string-match "\\.?0+\\'" f)
-	      (concat (substring f 0 (match-beginning 0)) ".0")
-	      f))
-	s)))
+  "Return X, a nonnegative float, in positional notation, as few digits
+as read back."
+  (pcase-let ((`(,digits . ,e) (fmt-float-digits x)))
+    (cond
+      ((<= e 0)
+       (concat "0." (make-string (- e) ?0) digits))
+      ((>= e (length digits))
+       (concat digits (make-string (- e (length digits)) ?0) ".0"))
+      (t
+       (concat (substring digits 0 e) "." (substring digits e))))))
 
 (defun fmt-fixed-digits (d x)
-  (format (format "%%.%df" d) x))
+  "Return X with D digits after the point; a point even with none."
+  (let ((s (format (format "%%.%df" d) x)))
+    (if (zerop d) (concat s ".") s)))
 
 (defun fmt-fixed (dir params)
   (let* ((arg (fmt-next-arg))
@@ -356,7 +384,7 @@ character code."
 	 (k (or (nth 2 params) 0))
 	 (overflow (nth 3 params))
 	 (padchar (or (nth 4 params) ?\s)))
-    (if (null x)
+    (if (or (null x) (isnan x) (= (abs x) 1.0e+INF))
 	(fmt-pad (fmt-princ arg) w 1 0 ?\s t)
 	(let* ((x (* x (expt 10.0 k)))
 	       (sign (cond ((< x 0) "-") ((fmt-dir-atp dir) "+") (t "")))
@@ -374,35 +402,52 @@ character code."
 	      (insert (make-string w overflow))
 	      (fmt-pad s w 1 0 padchar t))))))
 
+(defun fmt-exponential-string (x n k e marker)
+  "Return X, a nonnegative float, in exponential notation: N significant
+digits, or as few as read back when nil; K digits before the point, or
+-K zeros after it; at least E digits of exponent."
+  (pcase-let ((`(,digits . ,power) (if n (fmt-rounded-digits x n) (fmt-float-digits x))))
+    (let* ((mantissa
+	    (if (> k 0)
+		(let ((digits (if (< (length digits) k)
+				  (concat digits (make-string (- k (length digits)) ?0))
+				  digits)))
+		  (concat (substring digits 0 k) "."
+			  (if (> (length digits) k) (substring digits k) "0")))
+		(concat "0." (make-string (- k) ?0) digits)))
+	   (power (if (zerop x) 0 (- power k)))
+	   (power-digits (number-to-string (abs power))))
+      (when (and e (< (length power-digits) e))
+	(setq power-digits (concat (make-string (- e (length power-digits)) ?0) power-digits)))
+      (concat mantissa (string marker) (if (< power 0) "-" "+") power-digits))))
+
 (defun fmt-exponential (dir params)
   (let* ((arg (fmt-next-arg))
 	 (x (fmt-float-arg arg))
 	 (w (nth 0 params))
 	 (d (nth 1 params))
 	 (e (nth 2 params))
+	 (k (or (nth 3 params) 1))
 	 (overflow (nth 4 params))
 	 (padchar (or (nth 5 params) ?\s))
 	 (marker (or (nth 6 params) ?e)))
-    (if (null x)
+    (if (or (null x) (isnan x) (= (abs x) 1.0e+INF))
 	(fmt-pad (fmt-princ arg) w 1 0 ?\s t)
 	(let* ((sign (cond ((< x 0) "-") ((fmt-dir-atp dir) "+") (t "")))
-	       (s (format (if d (format "%%.%de" d) "%e") (abs x))))
-	  (string-match "\\`\\([0-9.]+\\)e\\([-+]\\)0*\\([0-9]+\\)\\'" s)
-	  (let* ((mantissa (match-string 1 s))
-		 (mantissa (if d
-			       mantissa
-			       (replace-regexp-in-string "\\([0-9]\\)0+\\'" "\\1"
-							 mantissa)))
-		 (exponent (match-string 3 s))
-		 (exponent (if (and e (< (length exponent) e))
-			       (concat (make-string (- e (length exponent)) ?0)
-				       exponent)
-			       exponent))
-		 (s (concat sign mantissa (string marker) (match-string 2 s)
-			    exponent)))
-	    (if (and w overflow (> (length s) w))
-		(insert (make-string w overflow))
-		(fmt-pad s w 1 0 padchar t)))))))
+	       (ax (abs x))
+	       ;; D digits after the point: K before it and D-K+1 after,
+	       ;; or -K zeros and D+K digits.
+	       (n (and d (max 1 (if (> k 0) (1+ d) (+ d k)))))
+	       (s (concat sign (fmt-exponential-string ax n k e marker))))
+	  ;; A width and no digits: as many digits as fit.
+	  (when (and w (not d) (> (length s) w))
+	    (let ((n (length (car (fmt-float-digits ax)))))
+	      (while (and (> n 1) (> (length s) w))
+		(setq n (1- n)
+		      s (concat sign (fmt-exponential-string ax n k e marker))))))
+	  (if (and w overflow (> (length s) w))
+	      (insert (make-string w overflow))
+	      (fmt-pad s w 1 0 padchar t))))))
 
 (defun fmt-general (dir params)
   (let ((x (fmt-float-arg (fmt-peek-arg))))
@@ -623,9 +668,11 @@ character code."
       ;; ~<...~:> is a logical block; there is no pretty printer, so
       ;; just print its prefix, body and suffix.
       (let* ((clauses (fmt-dir-clauses dir))
-	     (prefix (if (cdr clauses) (car clauses) nil))
+	     ;; ~:< puts the body in parentheses, unless it says else.
+	     (parens (fmt-dir-colonp dir))
+	     (prefix (cond ((cdr clauses) (car clauses)) (parens '("("))))
 	     (body (if (cdr clauses) (cadr clauses) (car clauses)))
-	     (suffix (nth 2 clauses)))
+	     (suffix (cond ((nth 2 clauses)) (parens '(")")))))
 	(fmt-run prefix)
 	(if (fmt-dir-atp dir)
 	    (catch 'fmt-escape (fmt-run body))

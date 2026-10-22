@@ -102,12 +102,18 @@
 	  (set sym sym)
 	  sym))))
 
-;;; Like load-time-value, but also usable when byte-compiling a single
-;;; function: there is no output file then, so evaluate FORM right away.
+;;; FORM's value, evaluated once, as load-time-value does.  Compiling a
+;;; file, it is kept in a global variable named after FORM: FORM may be
+;;; evaluated at compile time too, by EVAL-WHEN, where load-time-value's
+;;; variable is not set yet.  Otherwise, as when byte-compiling a single
+;;; function, there is no file: FORM is evaluated right away.
 (defmacro ecl--load-time-value (form)
   (if (and (macroexp-compiling-p)
 	   (bufferp (bound-and-true-p byte-compile--outbuffer)))
-      `(load-time-value ,form)
+      (let ((var (intern (format "ecl--load-time-%s"
+				 (secure-hash 'sha1 (prin1-to-string form))))))
+	`(or (and (boundp ',var) (symbol-value ',var))
+	     (set ',var ,form)))
       `(quote ,(eval form))))
 
 (if (eval-when-compile (featurep 'xemacs))

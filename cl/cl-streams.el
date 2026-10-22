@@ -225,9 +225,10 @@
 
 (defun FILE-POSITION (stream &optional position)
   (if position
-      ;; TODO: implement setting position
+      ;; Only the position is set: reading and writing do not move
+      ;; to it yet.  The value was missing, so this file never compiled.
       (progn
-	(setf (STREAM-position stream))
+	(setf (STREAM-position stream) position)
 	T)
       (STREAM-position stream)))
 
@@ -343,9 +344,9 @@
      (let ((answer (query-answer format args '("y" "n"))))
        (cond
 	 ((string-prefix-p "y" answer t)
-	  (throw 'Y-OR-N-P T))
+	  (throw 'Y-OR-N-P (cl:values T)))
 	 ((string-prefix-p "n" answer t)
-	  (throw 'Y-OR-N-P nil))
+	  (throw 'Y-OR-N-P (cl:values nil)))
 	 (t
 	  (WRITE-LINE "Please answer 'y' or 'n'." *QUERY-IO*)))))))
 
@@ -355,9 +356,9 @@
      (let ((answer (query-answer format args '("yes" "no"))))
        (cond
 	 ((string-equal answer "yes")
-	  (throw 'YES-OR-NO-P T))
+	  (throw 'YES-OR-NO-P (cl:values T)))
 	 ((string-equal answer "no")
-	  (throw 'YES-OR-NO-P nil))
+	  (throw 'YES-OR-NO-P (cl:values nil)))
 	 (t
 	  (WRITE-LINE "Please answer 'yes' or 'no'." *QUERY-IO*)))))))
 

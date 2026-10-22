@@ -506,17 +506,26 @@
 (defun eval-lambda-expr (lambda-expr args old-env)
   (MULTIPLE-VALUE-BIND (body decls doc) (parse-body (cddr lambda-expr) t)
     (let* ((lambda-list (second lambda-expr))
-	   (new-env
-	    (augment-environment old-env
-	      :variable (lambda-list-variables lambda-list)
-	      :declare decls))
-	  (other-keys-p nil)
-	  (allow-other-keys-p (memq '&ALLOW-OTHER-KEYS lambda-list))
-	  ;; Old values of parameters declared special, restored on exit.
-	  (saved nil))
+	   ;; With init forms, each parameter is added to the environment
+	   ;; as it is bound, as LET* does: an init form sees the
+	   ;; parameters before it, and outer variables of the names of
+	   ;; those after it.
+	   (one-by-one (cl-some (lambda (x) (memq x '(&OPTIONAL &KEY &AUX)))
+				lambda-list))
+	   (env (if one-by-one
+		    old-env
+		    (augment-environment old-env
+		      :variable (lambda-list-variables lambda-list)
+		      :declare decls)))
+	   (allow-other-keys-p (memq '&ALLOW-OTHER-KEYS lambda-list))
+	   ;; Old values of parameters declared special, restored on exit.
+	   (saved nil))
       (cl-flet ((bind (var val)
-		  (if (lexical-variable-p var new-env)
-		      (setf (lexical-value var new-env) val)
+		  (when one-by-one
+		    (setq env (augment-environment env :variable (list var)
+						   :declare decls)))
+		  (if (lexical-variable-p var env)
+		      (setf (lexical-value var env) val)
 		      (push (cons var (if (boundp var) (symbol-value var) unbound))
 			    saved)
 		      (setf (symbol-value var) val))))
@@ -529,11 +538,13 @@
 		     (ERROR "No value for required parameter."))
 		   (bind var (pop args)))
 		  (&OPTIONAL
-		   (when supplied
-		     (bind supplied (if args 'T nil)))
-		   (bind var (if args
-				 (pop args)
-				 (eval-with-env default new-env))))
+		   (let* ((suppliedp (if args 'T nil))
+			  (value (if args
+				     (pop args)
+				     (eval-with-env default env))))
+		     (bind var value)
+		     (when supplied
+		       (bind supplied suppliedp))))
 		  (&REST
 		   (bind var (copy-list args))
 		   (unless (memq '&KEY lambda-list)
@@ -546,14 +557,17 @@
 			(when supplied (bind supplied 'T))
 			(remf args (first arg)))
 		       (t
-			(bind var (eval-with-env default new-env))
+			(bind var (eval-with-env default env))
 			(when supplied (bind supplied nil))))))
 		  (&AUX
-		   (bind var (eval-with-env default new-env)))))
+		   (bind var (eval-with-env default env)))))
 	      (when (and args (not (or allow-other-keys-p
 				       (memq (kw ALLOW-OTHER-KEYS) args))))
 		(ERROR 'PROGRAM-ERROR))
-	      (eval-body body new-env))
+	      (when one-by-one
+		;; Free declarations, as of specials, cover the body too.
+		(setq env (augment-environment env :declare decls)))
+	      (eval-body body env))
 	  (dolist (binding saved)
 	    (if (eq (cdr binding) unbound)
 		(makunbound (car binding))
@@ -595,6 +609,19 @@
 		(apply fn args)
 		(APPLY fn args)))))))))
 
+(defconst predicate-types
+  '((listp . LIST) (consp . CONS) (symbolp . SYMBOL) (stringp . STRING)
+    (numberp . NUMBER) (number-or-marker-p . NUMBER) (integerp . INTEGER)
+    (integer-or-marker-p . INTEGER) (natnump . (INTEGER 0)) (fixnump . FIXNUM)
+    (characterp . CHARACTER) (arrayp . ARRAY) (sequencep . SEQUENCE)
+    (vectorp . VECTOR) (functionp . FUNCTION) (hash-table-p . HASH-TABLE)
+    (char-or-string-p . (OR CHARACTER STRING)))
+  "The Common Lisp types of Emacs Lisp's predicates, for type errors.")
+
+(defun predicate-type (predicate)
+  "Return the Common Lisp type an Emacs Lisp error's PREDICATE tests."
+  (or (cdr (assq predicate predicate-types)) predicate))
+
 (defun cl-debugger (&optional error args)
   (unless (eval-when-compile (featurep 'xemacs))
     (incf num-nonmacro-input-events))
@@ -618,7 +645,7 @@
     ((wrong-type-argument)
 		;; ARGS is (wrong-type-argument PREDICATE VALUE).
 		(ERROR 'TYPE-ERROR (kw DATUM) (caddr args)
-		       (kw EXPECTED-TYPE) (cadr args)))
+		       (kw EXPECTED-TYPE) (predicate-type (cadr args))))
     (no-catch
 		(ERROR 'CONTROL-ERROR))
     ((wrong-number-of-arguments no-catch wrong-type-argument)

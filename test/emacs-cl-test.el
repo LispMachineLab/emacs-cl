@@ -17,6 +17,9 @@
   (make-temp-file "emacs-cl-test-build-" t)
   "The build directory of the tests.")
 
+(add-hook 'kill-emacs-hook
+          (lambda () (delete-directory emacs-cl-test-build t)))
+
 (defun emacs-cl-test-wait (process predicate &optional seconds)
   "Wait until PREDICATE returns non-nil in PROCESS's buffer, or SECONDS."
   (let ((end (+ (float-time) (or seconds 120))))
@@ -147,5 +150,28 @@ newline ending its own."
       (with-current-buffer buffer
         (should (string-search "\n10 " (buffer-string)))
         (should (string-search "(\"0.00001\" \"12.345e+2\" \"2.\")" (buffer-string)))))))
+
+(ert-deftest emacs-cl-compiling-as-it-runs ()
+  "DEFSTRUCT, COMPILE and COMPILE-FILE compile as Common Lisp is built:
+with dynamic binding, and on Emacs 30 too, whose warnings.el loads
+icons.el."
+  (let* ((file (make-temp-file "emacs-cl-test-" nil ".lisp" "(defun twice (n) (* 2 n))\n"))
+         (base (file-name-sans-extension file)))
+    (unwind-protect
+        (emacs-cl-test-with-buffer buffer
+          (let ((process (emacs-cl-start
+                          buffer :eval `("(defstruct point x y)"
+                                         "(print (point-y (make-point :x 1 :y 2)))"
+                                         "(defun bar () (declare (special %bar%)) %bar%)"
+                                         "(print (funcall (compile nil '(lambda () (let ((%bar% 99)) (declare (special %bar%)) (bar))))))"
+                                         ,(format "(load (compile-file %S))" file)
+                                         "(print (twice 21))"))))
+            (should (emacs-cl-test-wait process (lambda () (not (process-live-p process)))))
+            (should (eq 0 (process-exit-status process)))
+            (with-current-buffer buffer
+              (should (string-match-p "\n2 \\(.\\|\n\\)*\n99 \\(.\\|\n\\)*\n42 " (buffer-string))))))
+      (dolist (suffix '(".lisp" ".el" ".elc"))
+        (when (file-exists-p (concat base suffix))
+          (delete-file (concat base suffix)))))))
 
 ;;; emacs-cl-test.el ends here

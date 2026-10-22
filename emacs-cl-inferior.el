@@ -45,8 +45,6 @@
 
 ;;; Code:
 
-(require 'cl-lib)
-
 (defvar emacs-cl-inferior--pending nil
   "Output not sent yet, newest first.")
 
@@ -375,13 +373,18 @@ status: 1 when a file or form not in the listener failed."
           build (file-name-as-directory (expand-file-name build)))
     (setq build (emacs-cl-inferior-build source build))
     (unless build-only
-      (let ((load-path (cons build load-path))
-            (load (symbol-function 'load)))
-        ;; load-cl.el loads each file with a message.
-        (cl-letf (((symbol-function 'load)
-                   (lambda (file &optional noerror _nomessage nosuffix must-suffix)
-                     (funcall load file noerror t nosuffix must-suffix))))
-          (load (expand-file-name "load-cl.el" build) nil t)))
+      (let ((load-path (cons build load-path)))
+        (load (expand-file-name "load-cl.el" build) nil t))
+      ;; Common Lisp compiles functions as it runs, as for DEFSTRUCT and
+      ;; COMPILE, written for dynamic binding, the binding it is built
+      ;; with, not this file's.  The compiler loads warnings.el, which
+      ;; on Emacs 30 loads icons.el, whose options signal errors they
+      ;; handle themselves; Common Lisp, which debugs on signal, would
+      ;; take them for its own, so it is loaded before.
+      (setq-default lexical-binding nil)
+      (setq lexical-binding nil
+            byte-compile-warnings nil)
+      (require 'warnings)
       (emacs-cl-inferior--connect)
       (defalias 'INVOKE-DEBUGGER #'emacs-cl-inferior--debugger)
       (catch 'emacs-cl-inferior--stop

@@ -68,7 +68,8 @@
 	;; The files use macros and functions defined in later files,
 	;; so they can't be macroexpanded eagerly when loaded as source.
 	(macroexp--pending-eager-loads '(skip)))
-    (mapc #'load *cl-files*)
+    (dolist (file *cl-files*)
+      (load file nil t))
     (populate-packages)
     (garbage-collect)))
 
